@@ -32,30 +32,48 @@ export default function Courses() {
     setTimeout(() => setToast(""), 2000);
   };
 
-  const normalizeCourses = (data) => {
-    return (data || []).map((c) => ({
-      ...c,
+  const normalizeCourses = (data, allStudents = [], allAssignments = []) => {
+    return (data || []).map((c) => {
+      const enrollments = Array.isArray(c?.enrollments)
+        ? c.enrollments
+        : [];
 
-      enrollments: Array.isArray(c?.enrollments) ? c.enrollments : [],
+      // Build students from enrollments first
+      let courseStudents = enrollments
+        .map((e) => e?.student || e?.studentId || null)
+        .filter(Boolean);
 
-      students: (Array.isArray(c?.enrollments) ? c.enrollments : [])
-        .map((e) =>
-          e?.student ||
-          e?.studentId ||
-          e?.user ||
-          e?.profile?.student || 
-          null
-        )
-        .filter(Boolean),
+      // Fallback: enrich using global students list
+      if (courseStudents.length === 0 && allStudents.length > 0) {
+        courseStudents = allStudents.filter((s) =>
+          enrollments.some(
+            (e) =>
+              e?.studentId === s?.id ||
+              e?.student?.id === s?.id
+          )
+        );
+      }
 
-      assignments: Array.isArray(c?.assignments)
+      // Assignments (backend or fallback linking)
+      let courseAssignments = Array.isArray(c?.assignments)
         ? c.assignments
-        : Array.isArray(c?.courseAssignments)
-        ? c.courseAssignments
-        : Array.isArray(c?.tasks)
-        ? c.tasks
-        : [],
-    }));
+        : [];
+
+      if (courseAssignments.length === 0 && allAssignments.length > 0) {
+        courseAssignments = allAssignments.filter(
+          (a) =>
+            a?.course?.id === c?.id ||
+            a?.courseId === c?.id
+        );
+      }
+
+      return {
+        ...c,
+        enrollments,
+        students: courseStudents,
+        assignments: courseAssignments,
+      };
+    });
   };
 
   const load = async () => {
@@ -68,9 +86,16 @@ export default function Courses() {
         getAssignments(),
       ]);
 
-      setCourses(normalizeCourses(Array.isArray(c) ? c : []));
-      setStudents(Array.isArray(s) ? s : []);
-      setAssignments(Array.isArray(a) ? a : []);
+      const safeCourses = Array.isArray(c) ? c : [];
+      const safeStudents = Array.isArray(s) ? s : [];
+      const safeAssignments = Array.isArray(a) ? a : [];
+
+      setStudents(safeStudents);
+      setAssignments(safeAssignments);
+
+      setCourses(
+        normalizeCourses(safeCourses, safeStudents, safeAssignments)
+      );
     } catch (err) {
       console.error(err);
       showToast(err?.response?.data?.error || "Load failed");
@@ -141,7 +166,6 @@ export default function Courses() {
 
     try {
       setSaving(true);
-
       await deleteCourse(id, token);
       showToast("Course deleted");
       await load();
@@ -198,7 +222,6 @@ export default function Courses() {
       <div className="grid">
         {courses.map((c) => (
           <div key={c.id} className="courseCard">
-
             <h3>{c.title}</h3>
             <p>Code: {c.code}</p>
 
@@ -211,7 +234,7 @@ export default function Courses() {
                 </div>
               ))
             ) : (
-              null
+              <p>No students enrolled</p>
             )}
 
             {/* ASSIGNMENTS */}

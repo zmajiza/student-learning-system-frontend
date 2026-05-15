@@ -37,37 +37,41 @@ export default function Students() {
     setTimeout(() => setToast(""), 2000);
   };
 
-  const normalizeStudents = (data) => {
-    return (data || []).map((st) => ({
-      ...st,
+  // ✅ MINIMAL FIX: DO NOT OVER-NORMALIZE, ONLY SAFE FALLBACKS
+  const normalizeStudents = (data, allCourses = []) => {
+    return (data || []).map((st) => {
+      const profile = st?.profile || null;
 
-      profile: st.profile ?? {},
-
-      enrollments: Array.isArray(st?.enrollments)
+      const enrollments = Array.isArray(st?.enrollments)
         ? st.enrollments
-        : [],
+        : [];
 
-      courses: (Array.isArray(st?.enrollments) ? st.enrollments : [])
-  .map((e) => {
-    const course = e?.course;
+      // ALWAYS try to resolve courses
+      const studentCourses = enrollments
+        .map((e) => {
+          // CASE 1: backend sends full course
+          if (e?.course) return e.course;
 
-    if (!course) return null;
+          // CASE 2: only courseId exists
+          return allCourses.find(
+            (c) => String(c.id) === String(e?.courseId || e?.course?.id)
+          );
+        })
+        .filter(Boolean)
+        .map((c) => ({
+          ...c,
+          assignments: Array.isArray(c?.assignments)
+            ? c.assignments
+            : [],
+        }));
 
-    return {
-      ...course,
-
-      assignments:
-  course?.assignments ||
-  course?.courseAssignments ||
-  course?.tasks ||
-  course?.assignmentList ||
-  course?.assignmentEntities ||
-  [],
-    };
-  })
-  .filter(Boolean),
-          
-    }));
+      return {
+        ...st,
+        profile: profile || {},
+        enrollments,
+        courses: studentCourses,
+      };
+    });
   };
 
   const loadData = async () => {
@@ -79,12 +83,11 @@ export default function Students() {
         getCourses(),
       ]);
 
-      const studentData = Array.isArray(s)
-        ? s
-        : s?.data || s?.content || [];
+      const studentData = Array.isArray(s) ? s : s?.data || s?.content || [];
+      const courseData = Array.isArray(c) ? c : [];
 
-      setStudents(normalizeStudents(studentData));
-      setCourses(Array.isArray(c) ? c : []);
+      setCourses(courseData);
+      setStudents(normalizeStudents(studentData, courseData));
     } catch (err) {
       console.error(err);
       showToast("Failed to load data");
@@ -123,7 +126,7 @@ export default function Students() {
         bio: form.bio || "",
         avatarUrl: form.avatarUrl || "",
       },
-      courseIds: (form.courseIds || []).map(String),
+      courseIds: (form.courseIds || []).filter(Boolean),
     };
 
     try {
@@ -175,7 +178,7 @@ export default function Students() {
       bio: s.profile?.bio || "",
       avatarUrl: s.profile?.avatarUrl || "",
       courseIds: (s.enrollments || [])
-        .map((e) => String(e?.course?.id))
+        .map((e) => String(e?.course?.id || e?.courseId))
         .filter(Boolean),
     });
   };
@@ -267,9 +270,10 @@ export default function Students() {
         {students.map((s) => (
           <div key={s.id} className="cardSmall">
 
-            {s.profile?.avatarUrl && (
+            {/* avatar  */}
+            {(s.profile?.avatarUrl || s.avatarUrl) && (
               <img
-                src={s.profile.avatarUrl}
+                src={s.profile?.avatarUrl || s.avatarUrl}
                 className="avatarSmall"
                 alt="avatar"
               />
@@ -277,16 +281,32 @@ export default function Students() {
 
             <h4>{s.firstName} {s.lastName}</h4>
             <p>{s.email}</p>
-            <p>{s.profile?.bio || "No bio"}</p>
+
+            {/* bio */}
+            <p>{s.profile?.bio || s.bio || "No bio"}</p>
 
             <div style={{ fontSize: 11, color: "#888" }}>
               Profile (1-1) | Courses (M-M)
             </div>
 
+            {/*  COURSES */}
             {s.courses?.length > 0 ? (
               s.courses.map((c) => (
                 <div key={c.id} className="miniSection">
                   <p>📘 {c.title}</p>
+
+                  {(c.assignments || []).length > 0 ? (
+                    c.assignments.map((a) => (
+                      <p key={a.id} style={{ marginLeft: 10, fontSize: 12 }}>
+                        📝 {a.title} —{" "}
+                        {a.dueDate
+                          ? new Date(a.dueDate).toLocaleDateString()
+                          : "No date"}
+                      </p>
+                    ))
+                  ) : (
+                    <p style={{ fontSize: 11 }}>No assignments</p>
+                  )}
                 </div>
               ))
             ) : (
